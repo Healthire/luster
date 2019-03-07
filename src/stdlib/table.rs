@@ -9,6 +9,22 @@ macro_rules! runtime_err {
     };
 }
 
+macro_rules! bad_arg {
+    ($mc:expr, $f:expr, $i:expr, $e:expr, $v:expr) => {
+        Error::RuntimeError(RuntimeError(Value::String(String::new(
+            $mc,
+            format!(
+                "bad argument #{} to {} ({} expected, got {})",
+                $i,
+                $f,
+                $e,
+                $v.type_name()
+            )
+            .as_bytes(),
+        ))))
+    };
+}
+
 pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'gc>) {
     let table = Table::new(mc);
 
@@ -35,44 +51,24 @@ pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'g
         }
     }
 
+    // concat
     table
         .set(
             mc,
             String::new_static(b"concat"),
             Callback::new_sequence(mc, |args: Vec<Value<'gc>>| {
                 Ok(sequence::from_fn_with(args, |mc, args| {
-                    let list = get_table_arg(args.get(0), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #1 to concat (table expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
+                    let list = get_table_arg(args.get(0), None)
+                        .map_err(|v| bad_arg!(mc, "concat", 1, "table", v))?;
                     let sep: Value<'gc> = match args.get(1).cloned().unwrap_or(Value::Nil) {
                         s @ Value::String(_) => s,
                         Value::Nil => Value::String(String::new_static(b"")),
-                        v => {
-                            return Err(runtime_err!(
-                                mc,
-                                "bad argument #2 to concat (string expected, got {})",
-                                v.type_name()
-                            ))
-                        }
+                        v => return Err(bad_arg!(mc, "concat", 2, "string", v)),
                     };
-                    let start = get_number_arg(args.get(2), Some(1)).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #3 to concat (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let end = get_number_arg(args.get(3), Some(list.length())).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #4 to concat (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
+                    let start = get_number_arg(args.get(2), Some(1))
+                        .map_err(|v| bad_arg!(mc, "concat", 3, "number", v))?;
+                    let end = get_number_arg(args.get(3), Some(list.length()))
+                        .map_err(|v| bad_arg!(mc, "concat", 4, "number", v))?;
 
                     let mut strings = Vec::new();
                     for i in start..=end {
@@ -102,47 +98,23 @@ pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'g
         )
         .unwrap();
 
+    // move
     table
         .set(
             mc,
             String::new_static(b"move"),
             Callback::new_sequence(mc, |args: Vec<Value<'gc>>| {
                 Ok(sequence::from_fn_with(args, |mc, args| {
-                    let src = get_table_arg(args.get(0), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #1 to move (table expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let src_start = get_number_arg(args.get(1), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #2 to move (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let src_end = get_number_arg(args.get(2), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #3 to move (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let dest_start = get_number_arg(args.get(3), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #4 to move (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let dest = get_table_arg(args.get(0), Some(src.clone())).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #5 to move (table expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
+                    let src = get_table_arg(args.get(0), None)
+                        .map_err(|v| bad_arg!(mc, "move", 1, "table", v))?;
+                    let src_start = get_number_arg(args.get(1), None)
+                        .map_err(|v| bad_arg!(mc, "move", 2, "number", v))?;
+                    let src_end = get_number_arg(args.get(2), None)
+                        .map_err(|v| bad_arg!(mc, "move", 3, "number", v))?;
+                    let dest_start = get_number_arg(args.get(3), None)
+                        .map_err(|v| bad_arg!(mc, "move", 4, "number", v))?;
+                    let dest = get_table_arg(args.get(0), Some(src.clone()))
+                        .map_err(|v| bad_arg!(mc, "move", 5, "table", v))?;
 
                     for i in src_start..=src_end {
                         dest.set(mc, dest_start + (i - src_start), src.get(i))?;
@@ -154,6 +126,7 @@ pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'g
         )
         .unwrap();
 
+    // pack
     table
         .set(
             mc,
@@ -171,33 +144,19 @@ pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'g
         )
         .unwrap();
 
+    // unpack
     table
         .set(
             mc,
             String::new_static(b"unpack"),
             Callback::new_sequence(mc, |args: Vec<Value<'gc>>| {
                 Ok(sequence::from_fn_with(args, |mc, args| {
-                    let list = get_table_arg(args.get(0), None).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #1 to move (table expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let start = get_number_arg(args.get(1), Some(1)).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #2 to unpack (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
-                    let end = get_number_arg(args.get(2), Some(list.length())).map_err(|v| {
-                        runtime_err!(
-                            mc,
-                            "bad argument #3 to unpack (number expected, got {})",
-                            v.type_name()
-                        )
-                    })?;
+                    let list = get_table_arg(args.get(0), None)
+                        .map_err(|v| bad_arg!(mc, "unpack", 1, "table", v))?;
+                    let start = get_number_arg(args.get(1), Some(1))
+                        .map_err(|v| bad_arg!(mc, "unpack", 2, "number", v))?;
+                    let end = get_number_arg(args.get(2), Some(list.length()))
+                        .map_err(|v| bad_arg!(mc, "unpack", 3, "number", v))?;
 
                     let mut unpacked = Vec::new();
                     for i in start..=end {
