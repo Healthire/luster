@@ -90,5 +90,66 @@ pub fn load_table<'gc>(mc: MutationContext<'gc, '_>, _: Root<'gc>, env: Table<'g
         }),
     ).unwrap();
 
+    table.set(mc, String::new_static(b"pack"), Callback::new_sequence(mc, |args| {
+        Ok(sequence::from_fn_with(args, |mc, args| {
+            let t = Table::new(mc);
+            for (i, v) in args.into_iter().enumerate() {
+                t.set(mc, i as i64 + 1, v)?;
+            }
+
+            Ok(CallbackResult::Return(vec![Value::Table(t)]))
+        }))
+    })).unwrap();
+
+    table.set(
+        mc,
+        String::new_static(b"unpack"),
+        Callback::new_sequence(mc, |args: Vec<Value<'gc>>| {
+            Ok(sequence::from_fn_with(args, |mc, args| {
+                let values = match args.get(0).unwrap_or(&Value::Nil) {
+                    Value::Table(t) => t,
+                    v => {
+                        return Err(runtime_err!(
+                            mc,
+                            "bad argument #1 to concat (table expected, got {})",
+                            v.type_name()
+                        ))
+                    }
+                };
+                let start = match args.get(1).unwrap_or(&Value::Nil) {
+                    Value::Integer(i) => *i,
+                    Value::Number(i) => i.floor() as i64,
+                    Value::Nil => 1,
+                    v => {
+                        return Err(runtime_err!(
+                            mc,
+                            "bad argument #3 to concat (number expected, got {})",
+                            v.type_name()
+                        ))
+                    }
+                };
+                let end = match args.get(2).unwrap_or(&Value::Nil) {
+                    Value::Integer(i) => *i,
+                    Value::Number(i) => i.floor() as i64,
+                    Value::Nil => values.length(),
+                    v => {
+                        return Err(runtime_err!(
+                            mc,
+                            "bad argument #4 to concat (number expected, got {})",
+                            v.type_name()
+                        ))
+                    }
+                };
+                
+                let mut unpacked = Vec::new();
+                for i in start..=end {
+                    unpacked.push(values.get(i));
+                }
+
+                Ok(CallbackResult::Return(unpacked))
+            })
+        }),
+    ).unwrap();
+
     env.set(mc, String::new_static(b"table"), table).unwrap();
 }
